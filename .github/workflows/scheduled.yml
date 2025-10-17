@@ -1,0 +1,180 @@
+name: Scheduled - 定时任务
+
+# 定时触发和手动触发
+on:
+  schedule:
+    # 每天早上 9:00 UTC (北京时间 17:00) 运行
+    - cron: '0 9 * * *'
+    # 每周日凌晨 2:00 UTC 运行完整检查
+    - cron: '0 2 * * 0'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  # 每日健康检查
+  daily-health-check:
+    name: 每日健康检查
+    runs-on: ubuntu-latest
+    # 只在每天 9:00 或手动触发时运行
+    if: github.event.schedule == '0 9 * * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: 快速测试
+        run: |
+          echo "🔍 运行快速健康检查..."
+          pytest tests/ -v -k "not slow"
+
+      - name: 代码质量检查
+        run: |
+          echo "📊 检查代码质量..."
+          flake8 calculator --count --statistics
+
+      - name: 生成报告
+        if: always()
+        run: |
+          echo "## 📅 每日健康检查报告" >> $GITHUB_STEP_SUMMARY
+          echo "- 日期：$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          echo "- 状态：${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # 每周完整检查
+  weekly-full-check:
+    name: 每周完整检查
+    runs-on: ubuntu-latest
+    # 只在周日 2:00 运行
+    if: github.event.schedule == '0 2 * * 0'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: 完整测试套件
+        run: |
+          echo "🔍 运行完整测试套件..."
+          pytest tests/ -v --cov=calculator --cov-report=term --cov-report=html
+
+      - name: 代码质量全面检查
+        run: |
+          echo "📊 运行代码质量检查..."
+          flake8 calculator tests --count --statistics
+          pylint calculator --max-line-length=88 || true
+
+      - name: 检查依赖更新
+        run: |
+          echo "📦 检查依赖包是否有更新..."
+          pip list --outdated
+
+      - name: 安全检查
+        run: |
+          echo "🔒 检查安全漏洞..."
+          pip install safety
+          safety check --json || true
+
+      - name: 生成周报
+        if: always()
+        run: |
+          echo "## 📊 每周完整检查报告" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 基本信息" >> $GITHUB_STEP_SUMMARY
+          echo "- 检查日期：$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          echo "- 状态：${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 检查项目" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ 完整测试套件" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ 代码质量检查" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ 依赖更新检查" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ 安全漏洞扫描" >> $GITHUB_STEP_SUMMARY
+
+      - name: 上传覆盖率报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-coverage-report
+          path: htmlcov/
+          retention-days: 30
+
+  # 依赖更新检查
+  dependency-check:
+    name: 检查依赖更新
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装当前依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 检查过时的包
+        id: outdated
+        run: |
+          echo "## 📦 依赖包更新情况" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          pip list --outdated >> $GITHUB_STEP_SUMMARY || echo "所有包都是最新的" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: 安全漏洞检查
+        run: |
+          pip install safety
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔒 安全漏洞检查" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          safety check --json > safety_report.json || true
+          if [ -s safety_report.json ]; then
+            echo "⚠️ 发现安全漏洞，请查看 safety_report.json" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ 未发现已知安全漏洞" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # 定时任务状态通知
+  notification:
+    name: 任务完成通知
+    runs-on: ubuntu-latest
+    needs: [daily-health-check, weekly-full-check]
+    if: always()
+
+    steps:
+      - name: 生成通知
+        run: |
+          echo "## 🔔 定时任务执行结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 每日检查：${{ needs.daily-health-check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 每周检查：${{ needs.weekly-full-check.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.daily-health-check.result }}" == "failure" ] || [ "${{ needs.weekly-full-check.result }}" == "failure" ]; then
+            echo "⚠️ 部分检查失败，请查看详细日志" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ 所有检查通过" >> $GITHUB_STEP_SUMMARY
+          fi

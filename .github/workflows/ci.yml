@@ -1,0 +1,143 @@
+name: CI - 持续集成
+
+# 触发条件
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:  # 允许手动触发
+
+# 环境变量
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # 代码质量检查任务
+  code-quality:
+    name: 代码质量检查
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: 设置 Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'  # 缓存 pip 依赖
+
+      # 3. 安装依赖
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # 4. 代码格式检查 (flake8)
+      - name: Flake8 代码规范检查
+        run: |
+          # 检查代码风格，忽略行长度和文档字符串
+          flake8 calculator tests --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 calculator tests --count --max-line-length=88 --statistics
+        continue-on-error: false
+
+      # 5. 代码质量检查 (pylint)
+      - name: Pylint 代码质量检查
+        run: |
+          pylint calculator --max-line-length=88
+        continue-on-error: true  # pylint 失败不中断流程
+
+      # 6. 代码格式化检查 (black)
+      - name: Black 格式检查
+        run: |
+          black --check calculator tests
+        continue-on-error: true
+
+  # 单元测试任务
+  test:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    needs: code-quality  # 依赖代码质量检查
+
+    steps:
+      # 1. 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: 设置 Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      # 3. 安装依赖
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      # 4. 运行测试并生成覆盖率报告
+      - name: 运行测试
+        run: |
+          pytest tests/ -v --cov=calculator --cov-report=xml --cov-report=html --cov-report=term
+
+      # 5. 上传覆盖率报告到 artifacts
+      - name: 上传覆盖率报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 30
+
+      # 6. 显示测试总结
+      - name: 测试总结
+        if: always()
+        run: |
+          echo "✅ 测试完成！"
+          echo "📊 覆盖率报告已生成"
+
+  # 构建检查任务
+  build:
+    name: 构建检查
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      # 1. 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 设置 Python 环境
+      - name: 设置 Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # 3. 安装构建工具
+      - name: 安装构建工具
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      # 4. 构建包
+      - name: 构建 Python 包
+        run: |
+          python -m build
+
+      # 5. 检查包
+      - name: 检查包完整性
+        run: |
+          twine check dist/*
+
+      # 6. 上传构建产物
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package
+          path: dist/
+          retention-days: 7
