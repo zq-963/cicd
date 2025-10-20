@@ -75,7 +75,7 @@ class Calculator:
         Returns:
             幂运算结果
         """
-        return base ** exponent
+        return base**exponent
 
     def square_root(self, n: float) -> float:
         """
@@ -92,7 +92,7 @@ class Calculator:
         """
         if n < 0:
             raise ValueError("不能对负数求平方根")
-        return n ** 0.5
+        return n**0.5
 
 
-#测试tag
+# 测试tag
