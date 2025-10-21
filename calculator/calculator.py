@@ -3,6 +3,7 @@
 提供基本的数学运算功能
 """
 
+import math
 
 class Calculator:
     """简单计算器类，提供基本数学运算"""
